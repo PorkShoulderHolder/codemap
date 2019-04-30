@@ -32,6 +32,11 @@ Need functionality for inspecting a single function.
 
 
 def get_files(path):
+    """
+    flattens the directory at path 
+    :param path: string path
+    :return list
+    """
     if os.path.isdir(path):
         for root, dirs, files in os.walk(path):
             for name in files:
