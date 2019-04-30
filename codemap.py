@@ -1,3 +1,4 @@
+from __future__ import print_function
 import click
 import re
 import os
@@ -5,8 +6,13 @@ from collections import defaultdict
 import graphviz
 import inspect
 from types import FunctionType
-
+from tqdm import tqdm
 import sys
+import editdistance
+import warnings
+import json
+
+warnings.filterwarnings("ignore")
 
 if sys.version_info > (3, 0):
     from importlib.machinery import SourceFileLoader
@@ -54,10 +60,10 @@ def get_functions(fn):
             m = SourceFileLoader(module_name, fn).load_module()
         else:
             m = imp.load_source(module_name, fn)
-        print("loaded {}".format(module_name))
+        # print("loaded {}".format(module_name))
     except Exception as e:
-        print(e)
-        print("could not load {}".format(fn))
+        # print(e)
+        # print("could not load {}".format(fn))
         return []
 
     file_str = open(fn).read()
@@ -89,12 +95,18 @@ def get_functions(fn):
 
 
 def make_maps(filename, exclude):
+    try:
+        definition_map = json.load(open(".defs.codemap"))
+        file_map = json.load(open(".files.codemap"))
+        print("using .files.codemap and .defs.codemap found locally")
+        return definition_map, file_map
+    except IOError:
+        pass
     files = [f for f in get_files(filename) if f[-3:] == ".py" and
              f[-4] != "_" and exclude not in f]
     definition_map = {}
     file_map = {}
-    for f in files:
-
+    for f in tqdm(files, leave=False, desc="Parsing Files"):
         funcs = get_functions(f)
         file_map[f] = funcs
         for fn in funcs:
@@ -147,72 +159,77 @@ def filter_deps(deps, inspect_function, def_map, degrees):
         return new_deps
 
 
-
 def get_function_dependencies(definition_map, file_map):
-    dependencies = defaultdict(lambda: set())
-    callers = defaultdict(lambda: set())
+
     unique_fn = set()
     unique_fn_size = 0
-    for fn_name in definition_map.keys():
+    try:
+        dependencies = json.load(open(".deps.codemap"))
+        callers = json.load(open(".callers.codemap"))
+        print("using .defs.codemap and .callers.codemap found locally")
+        return dependencies, callers
+    except IOError:
+        dependencies = defaultdict(lambda: set())
+        callers = defaultdict(lambda: set())
+    for fn_name in tqdm(definition_map.keys(), leave=False, desc="Building "
+                                                                 "Dependency Maps"):
 
         func = definition_map[fn_name]
         new_str = func["text"]
         file_name = func["file"]
         unique_fn.add(file_name)
         if len(unique_fn) > unique_fn_size:
-            print(file_name)
             unique_fn_size += 1
 
         file_text = open(file_name).read()
 
         for k in definition_map.keys():
             if k in new_str:
-                if k == "update_system_with_file":
-                    print("----------", fn_name, " =====")
-                idx = new_str.index(k)
-                not_lit_a = (new_str[0:idx].count("'") % 2 == 0 and
-                             new_str[idx:].count("'") % 2 == 0) or \
-                            new_str[0:idx].count("'") == 0 or \
-                            new_str[idx:].count("'") == 0
-                not_lit_b = (new_str[0:idx].count('"') % 2 == 0 and
-                             new_str[idx:].count('"') % 2 == 0) or \
-                            new_str[idx:].count('"') == 0 or \
-                            new_str[0:idx].count('"') == 0
+                try:
+                    idx = new_str.index(k)
+                    not_lit_a = (new_str[0:idx].count("'") % 2 == 0 and
+                                 new_str[idx:].count("'") % 2 == 0) or \
+                                new_str[0:idx].count("'") == 0 or \
+                                new_str[idx:].count("'") == 0
+                    not_lit_b = (new_str[0:idx].count('"') % 2 == 0 and
+                                 new_str[idx:].count('"') % 2 == 0) or \
+                                new_str[idx:].count('"') == 0 or \
+                                new_str[0:idx].count('"') == 0
 
-                # find if in comment
-                idx_0 = idx
-                while new_str[idx_0] != '#' and new_str[idx_0] != '\n' and \
-                        idx_0 > 0:
-                    idx_0 -= 1
+                    # find if in comment
+                    idx_0 = idx
+                    while new_str[idx_0] != '#' and new_str[idx_0] != '\n' and \
+                            idx_0 > 0:
+                        idx_0 -= 1
 
-                is_not_comment = new_str[idx_0] != "#"
+                    is_not_comment = new_str[idx_0] != "#"
 
-                module_parts = definition_map[k]["file"][:-3].replace("/",
-                                                                      ".")
-                if module_parts[0:2] == "..":
-                    module_parts = module_parts[2:].split(".")
+                    module_parts = definition_map[k]["file"][:-3].replace("/",
+                                                                          ".")
+                    if module_parts[0:2] == "..":
+                        module_parts = module_parts[2:].split(".")
 
-                first_class = file_text.index("\nclass") if \
-                    "\nclass" in file_text else len(file_text)
-                first_func = file_text.index("\ndef") if \
-                    "\ndef" in file_text else len(file_text)
+                    first_class = file_text.index("\nclass") if \
+                        "\nclass" in file_text else len(file_text)
+                    first_func = file_text.index("\ndef") if \
+                        "\ndef" in file_text else len(file_text)
 
-                imports_end = min(first_func, first_class)
-                is_imported = any(p in file_text[:imports_end]
-                                  for p in [module_parts[-1]]) or \
-                              re.search('[\s|,]' + k + '[\s|,]',
-                                        file_text[:imports_end]) is not None
-                is_local = k in [o["name"] for o in file_map[file_name]]
-                if fn_name == "update_system_with_file":
-                    print(k, is_imported, is_local, is_not_comment, not_lit_a, not_lit_b, " =====", module_parts)
-                if not_lit_a and not_lit_b and k not in file_map[file_name] \
-                       and not new_str[idx - 1].isalnum() \
-                        and not new_str[idx + len(k)].isalnum() and \
-                        not new_str[idx + len(k)] == "_" and \
-                        not new_str[idx - 1] == "_" and \
-                        is_not_comment and (is_imported or is_local) and fn_name != k:
-                    callers[k].add(fn_name)
-                    dependencies[fn_name].add(k)
+                    imports_end = min(first_func, first_class)
+                    is_imported = any(p in file_text[:imports_end]
+                                      for p in [module_parts[-1]]) or \
+                                  re.search(u'[\s|,]' + k + u'[\s|,]',
+                                            file_text[:imports_end]) is not None
+                    is_local = k in [o["name"] for o in file_map[file_name]]
+                    if not_lit_a and not_lit_b and k not in file_map[file_name] \
+                           and not new_str[idx - 1].isalnum() \
+                            and not new_str[idx + len(k)].isalnum() and \
+                            not new_str[idx + len(k)] == "_" and \
+                            not new_str[idx - 1] == "_" and \
+                            is_not_comment and (is_imported or is_local) and fn_name != k:
+                        callers[k].add(fn_name)
+                        dependencies[fn_name].add(k)
+                except:
+                    pass
 
     return dependencies, callers
 
@@ -222,7 +239,9 @@ def graph_from_deps(dependencies, definition_map, file_map, reverse=False,
                     highlight_files=None, show_files=None):
     dot = graphviz.Digraph() if update_graph is None else update_graph
 
-    for f in dependencies.keys() + flatten_deps(dependencies):
+    print("{} nodes".format(len(dependencies)))
+    print("{} edges".format(sum(len(d) for d in dependencies)))
+    for f in tqdm(dependencies.keys() + flatten_deps(dependencies), desc="Adding Nodes", leave=False):
         func = definition_map[f]
         file_name = func["file"]
         shape = "rectangle" if func["is_class"] else 'ellipse'
@@ -242,7 +261,7 @@ def graph_from_deps(dependencies, definition_map, file_map, reverse=False,
             else:
                 dot.node(f)
 
-    for fn_name in dependencies.keys():
+    for fn_name in tqdm(dependencies.keys(), desc="Adding Edges", leave=False):
         func = definition_map[fn_name]
         file_name = func["file"]
         deps = dependencies[fn_name]
@@ -280,23 +299,21 @@ def graph_from_deps(dependencies, definition_map, file_map, reverse=False,
 
 @click.command()
 @click.option("--exclude")
-@click.option("--inspect-function")
+@click.option("--inspect-function", default=None)
 @click.option("--highlight-files")
 @click.option("--show-files", is_flag=True)
 @click.option("--show-dependencies", is_flag=True)
+@click.option("--cache-result", is_flag=True)
 @click.option("--degrees", default=5)
 @click.argument("filename")
 def analyze_deps(filename, exclude, inspect_function, highlight_files,
-                 show_files, show_dependencies, degrees):
-    print(show_files)
+                 show_files, show_dependencies, cache_result, degrees):
     sys.path.append(os.getcwd())
     if highlight_files is not None:
         highlight_files = highlight_files.split(",")
 
-
-
-
     def_map, file_map = make_maps(filename, exclude)
+
     dependencies, callers = get_function_dependencies(def_map, file_map)
 
     if highlight_files is not None:
@@ -316,20 +333,48 @@ def analyze_deps(filename, exclude, inspect_function, highlight_files,
             for d in intersecting_deps:
                 def_map[d]["intersection"] = True
 
-    dot = graph_from_deps(filter_deps(dependencies, inspect_function, def_map,
-                                      degrees), def_map, file_map,
-                          reverse=show_dependencies,
-                          inspect_function=inspect_function,
-                          highlight_files=highlight_files,
-                          show_files=show_files)
-    dot2 = graph_from_deps(filter_deps(callers, inspect_function, def_map,
-                                       degrees), def_map, file_map,
-                           reverse=not show_dependencies, update_graph=dot,
-                           inspect_function=inspect_function,
-                           highlight_files=highlight_files,
-                           show_files=show_files)
+    if inspect_function is not None:
+        if inspect_function not in def_map:
+            min_d = 100000
+            best_k = inspect_function
+            for k in def_map.keys():
+                d = editdistance.eval(inspect_function, k)
+                if min_d > d:
+                    min_d = d
+                    best_k = k
+            print("{} not found as a function... returning results for {}"
+                  .format(inspect_function, best_k))
+            inspect_function = best_k
+        dot = graph_from_deps(filter_deps(dependencies, inspect_function, def_map,
+                                          degrees), def_map, file_map,
+                               reverse=show_dependencies,
+                              inspect_function=inspect_function,
+                              highlight_files=highlight_files,
+                              show_files=show_files)
+        dot = graph_from_deps(filter_deps(callers, inspect_function, def_map,
+                                           degrees), def_map, file_map,
+                               reverse=not show_dependencies, update_graph=dot,
+                               inspect_function=inspect_function,
+                               highlight_files=highlight_files,
+                               show_files=show_files)
+    else:
+        dot = graph_from_deps(dependencies, def_map, file_map,
+                              reverse=show_dependencies,
+                              highlight_files=highlight_files,
+                              show_files=show_files)
 
-    dot2.render(view=True)
+    print('now_drawin')
+    dot.render(view=True)
+    if cache_result:
+        for k in dependencies.keys():
+            dependencies[k] = list(dependencies[k])
+        for k in callers.keys():
+            callers[k] = list(callers[k])
+        json.dump(def_map, open(".defs.codemap", "w+"))
+        json.dump(file_map, open(".files.codemap", "w+"))
+        json.dump(dict(dependencies), open(".deps.codemap", "w+"))
+        json.dump(dict(callers), open(".callers.codemap", "w+"))
+
 
 if __name__ == '__main__':
     analyze_deps()
