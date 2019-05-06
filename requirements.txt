@@ -2,3 +2,4 @@ graphviz
 click
 tqdm
 editdistance
+igraph
