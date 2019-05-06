@@ -1,0 +1,11 @@
+Metadata-Version: 1.0
+Name: codemap
+Version: 0.3
+Summary: A python in-project functional dependency analyzer. 
+Home-page: https://github.com/PorkShoulderHolder/codemap
+Author: Sam Fox Royston
+Author-email: sfoxroyston@gmail.com
+License: MIT
+Description: UNKNOWN
+Keywords: static analysis,visualization,dependencies,python
+Platform: UNKNOWN

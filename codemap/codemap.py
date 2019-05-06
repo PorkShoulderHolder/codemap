@@ -12,6 +12,7 @@ import editdistance
 import warnings
 import json
 
+
 warnings.filterwarnings("ignore")
 
 if sys.version_info > (3, 0):
@@ -65,10 +66,9 @@ def get_functions(fn):
             m = SourceFileLoader(module_name, fn).load_module()
         else:
             m = imp.load_source(module_name, fn)
-        # print("loaded {}".format(module_name))
     except Exception as e:
-        # print(e)
-        # print("could not load {}".format(fn))
+        print(e)
+        print("could not load {}".format(fn))
         return []
 
     file_str = open(fn).read()
@@ -100,13 +100,6 @@ def get_functions(fn):
 
 
 def make_maps(filename, exclude):
-    try:
-        definition_map = json.load(open(".defs.codemap"))
-        file_map = json.load(open(".files.codemap"))
-        print("using .files.codemap and .defs.codemap found locally")
-        return definition_map, file_map
-    except IOError:
-        pass
     files = [f for f in get_files(filename) if f[-3:] == ".py" and
              f[-4] != "_" and exclude not in f]
     definition_map = {}
@@ -114,6 +107,7 @@ def make_maps(filename, exclude):
     for f in tqdm(files, leave=False, desc="Parsing Files"):
         funcs = get_functions(f)
         file_map[f] = funcs
+
         for fn in funcs:
             definition_map[fn["name"]] = {"file": f, "text": fn["text"],
                                           "is_class": fn["is_class"]}
@@ -125,7 +119,10 @@ def follow_deps(deps, starting_point, degrees=1):
     filtered_deps = defaultdict(lambda: set())
 
     def r(sp, deg):
-        dependents = deps[sp]
+        if sp in deps:
+            dependents = deps[sp]
+        else:
+            dependents = set()
         if deg > 0:
             for d in dependents:
                 r(d, deg - 1)
@@ -147,10 +144,10 @@ def flatten_deps(deps):
 
 def filter_deps(deps, inspect_function, def_map, degrees):
     if inspect_function is not None:
-        print("inspecting")
         new_deps = {}
         ins_fs = inspect_function.split(',')
         intersecting_deps = set(flatten_deps(deps))
+
         for f in ins_fs:
             d_0 = follow_deps(deps, f, degrees=degrees)
             intersecting_deps = intersecting_deps.intersection(
@@ -165,19 +162,13 @@ def filter_deps(deps, inspect_function, def_map, degrees):
 
 
 def get_function_dependencies(definition_map, file_map):
-
     unique_fn = set()
     unique_fn_size = 0
-    try:
-        dependencies = json.load(open(".deps.codemap"))
-        callers = json.load(open(".callers.codemap"))
-        print("using .defs.codemap and .callers.codemap found locally")
-        return dependencies, callers
-    except IOError:
-        dependencies = defaultdict(lambda: set())
-        callers = defaultdict(lambda: set())
-    for fn_name in tqdm(definition_map.keys(), leave=False, desc="Building "
-                                                                 "Dependency Maps"):
+    dependencies = defaultdict(lambda: set())
+    callers = defaultdict(lambda: set())
+
+    for fn_name in tqdm(definition_map.keys(), leave=False,
+                        desc="Building Dependency Maps"):
 
         func = definition_map[fn_name]
         new_str = func["text"]
@@ -194,17 +185,17 @@ def get_function_dependencies(definition_map, file_map):
                     idx = new_str.index(k)
                     not_lit_a = (new_str[0:idx].count("'") % 2 == 0 and
                                  new_str[idx:].count("'") % 2 == 0) or \
-                                new_str[0:idx].count("'") == 0 or \
-                                new_str[idx:].count("'") == 0
+                                 new_str[0:idx].count("'") == 0 or \
+                                 new_str[idx:].count("'") == 0
                     not_lit_b = (new_str[0:idx].count('"') % 2 == 0 and
                                  new_str[idx:].count('"') % 2 == 0) or \
-                                new_str[idx:].count('"') == 0 or \
-                                new_str[0:idx].count('"') == 0
+                                 new_str[idx:].count('"') == 0 or \
+                                 new_str[0:idx].count('"') == 0
 
                     # find if in comment
                     idx_0 = idx
-                    while new_str[idx_0] != '#' and new_str[idx_0] != '\n' and \
-                            idx_0 > 0:
+                    while new_str[idx_0] != '#' and new_str[idx_0] != '\n' \
+                            and idx_0 > 0:
                         idx_0 -= 1
 
                     is_not_comment = new_str[idx_0] != "#"
@@ -225,15 +216,18 @@ def get_function_dependencies(definition_map, file_map):
                                   re.search(u'[\s|,]' + k + u'[\s|,]',
                                             file_text[:imports_end]) is not None
                     is_local = k in [o["name"] for o in file_map[file_name]]
-                    if not_lit_a and not_lit_b and k not in file_map[file_name] \
-                           and not new_str[idx - 1].isalnum() \
-                            and not new_str[idx + len(k)].isalnum() and \
+                    if not_lit_a and not_lit_b and \
+                            k not in file_map[file_name] and \
+                            not new_str[idx - 1].isalnum() and \
+                            not new_str[idx + len(k)].isalnum() and \
                             not new_str[idx + len(k)] == "_" and \
                             not new_str[idx - 1] == "_" and \
-                            is_not_comment and (is_imported or is_local) and fn_name != k:
+                            is_not_comment and \
+                            (is_imported or is_local) and \
+                            fn_name != k:
                         callers[k].add(fn_name)
                         dependencies[fn_name].add(k)
-                except:
+                except ValueError:
                     pass
 
     return dependencies, callers
@@ -244,9 +238,8 @@ def graph_from_deps(dependencies, definition_map, file_map, reverse=False,
                     highlight_files=None, show_files=None):
     dot = graphviz.Digraph() if update_graph is None else update_graph
 
-    print("{} nodes".format(len(dependencies)))
-    print("{} edges".format(sum(len(d) for d in dependencies)))
-    for f in tqdm(dependencies.keys() + flatten_deps(dependencies), desc="Adding Nodes", leave=False):
+    for f in tqdm(dependencies.keys() + flatten_deps(dependencies),
+                  desc="Adding Nodes", leave=False):
         func = definition_map[f]
         file_name = func["file"]
         shape = "rectangle" if func["is_class"] else 'ellipse'
@@ -261,10 +254,14 @@ def graph_from_deps(dependencies, definition_map, file_map, reverse=False,
         cluster_name = "shared_functions" if "intersection" in func and \
                                              not show_files else file_name
         with dot.subgraph(name="cluster_" + cluster_name) as cu:
-            if highlight_files is not None and file_name in highlight_files or cluster_name == "shared_functions" or show_files:
+            if highlight_files is not None and file_name in highlight_files\
+                    or cluster_name == "shared_functions" or show_files:
                 cu.node(f)
             else:
                 dot.node(f)
+
+    def c(x):
+        return "lightblue" if "intersection" in definition_map[k] else x
 
     for fn_name in tqdm(dependencies.keys(), desc="Adding Edges", leave=False):
         func = definition_map[fn_name]
@@ -272,14 +269,14 @@ def graph_from_deps(dependencies, definition_map, file_map, reverse=False,
         deps = dependencies[fn_name]
 
         for k in deps:
-            cluster_name = "shared_functions" if "intersection" in definition_map[k] and not show_files else definition_map[k]["file"]
+            cluster_name = "shared_functions" if \
+                "intersection" in definition_map[k] and \
+                not show_files else definition_map[k]["file"]
             with dot.subgraph(name="cluster_" + cluster_name) as cu:
                 cu.attr(label=cluster_name)
                 cu.attr(color='lightblue', style='filled')
-                shape = "rectangle" if definition_map[k][
-                    "is_class"] else \
+                shape = "rectangle" if definition_map[k]["is_class"] else \
                     'ellipse'
-                c = lambda x: "lightblue" if "intersection" in definition_map[k] else x
 
                 if inspect_function is not None and k == inspect_function:
                     dot.attr('node', shape=shape,
@@ -288,8 +285,10 @@ def graph_from_deps(dependencies, definition_map, file_map, reverse=False,
                     dot.attr('node', shape=shape,
                              style='filled', color=c('lightgrey'))
 
-                if definition_map[k]["file"] == file_name and highlight_files is not None and \
-                        (definition_map[k]["file"] in highlight_files or cluster_name == "shared_functions") or show_files:
+                if definition_map[k]["file"] == file_name and \
+                        highlight_files is not None and \
+                        (definition_map[k]["file"] in highlight_files or
+                         cluster_name == "shared_functions") or show_files:
                     if reverse:
                         dot.edge(k, fn_name)
                     else:
@@ -309,18 +308,41 @@ def graph_from_deps(dependencies, definition_map, file_map, reverse=False,
 @click.option("--show-files", is_flag=True)
 @click.option("--show-dependencies", is_flag=True)
 @click.option("--cache-result", is_flag=True)
-@click.option("--degrees", default=5)
+@click.option("--use-cache", is_flag=True)
+@click.option("--degrees", default=8)
 @click.argument("filename")
 def analyze_deps(filename, exclude, inspect_function, highlight_files,
-                 show_files, show_dependencies, cache_result, degrees):
+                 show_files, show_dependencies, cache_result, use_cache,
+                 degrees):
+
     sys.path.append(os.getcwd())
+    sys.path.append(os.path.abspath(filename))
+    os.chdir(filename)
+    filename = '.'
     if highlight_files is not None:
         highlight_files = highlight_files.split(",")
 
-    def_map, file_map = make_maps(filename, exclude)
-
-    dependencies, callers = get_function_dependencies(def_map, file_map)
-
+    if not use_cache:
+        def_map, file_map = make_maps(filename, exclude)
+        dependencies, callers = get_function_dependencies(def_map, file_map)
+    else:
+        try:
+            def_map = json.load(open(".defs.codemap"))
+            file_map = json.load(open(".files.codemap"))
+            dependencies = json.load(open('.deps.codemap'))
+            callers = json.load(open('.callers.codemap'))
+            print("using .codemap files found locally")
+        except IOError:
+            print("could not find .files.codemap, .defs.codemap, "
+                  ".callers.codemap, and .deps.codemap locally,"
+                  " computing from scratch...")
+            def_map, file_map = make_maps(filename, exclude)
+            dependencies, callers = get_function_dependencies(def_map,
+                                                              file_map)
+    print("Dependency graph: {} nodes, {} edges".format(len(dependencies),
+                                      sum(len(d) for d in dependencies)))
+    print("Caller graph: {} nodes, {} edges".format(len(callers),
+                                      sum(len(d) for d in callers)))
     if highlight_files is not None:
         ins_fns = highlight_files
         intersecting_deps = set(flatten_deps(dependencies))
@@ -350,26 +372,26 @@ def analyze_deps(filename, exclude, inspect_function, highlight_files,
             print("{} not found as a function... returning results for {}"
                   .format(inspect_function, best_k))
             inspect_function = best_k
-        dot = graph_from_deps(filter_deps(dependencies, inspect_function, def_map,
-                                          degrees), def_map, file_map,
-                               reverse=show_dependencies,
+        dot = graph_from_deps(filter_deps(dependencies, inspect_function,
+                                          def_map, degrees), def_map, file_map,
+                              reverse=show_dependencies,
                               inspect_function=inspect_function,
                               highlight_files=highlight_files,
                               show_files=show_files)
         dot = graph_from_deps(filter_deps(callers, inspect_function, def_map,
                                            degrees), def_map, file_map,
-                               reverse=not show_dependencies, update_graph=dot,
-                               inspect_function=inspect_function,
-                               highlight_files=highlight_files,
-                               show_files=show_files)
+                              reverse=not show_dependencies, update_graph=dot,
+                              inspect_function=inspect_function,
+                              highlight_files=highlight_files,
+                              show_files=show_files)
     else:
         dot = graph_from_deps(dependencies, def_map, file_map,
                               reverse=show_dependencies,
                               highlight_files=highlight_files,
                               show_files=show_files)
 
-    print('now_drawin')
     dot.render(view=True)
+
     if cache_result:
         for k in dependencies.keys():
             dependencies[k] = list(dependencies[k])

@@ -1,0 +1,12 @@
+MANIFEST.in
+README.md
+setup.cfg
+setup.py
+codemap/__init__.py
+codemap/codemap.py
+codemap.egg-info/PKG-INFO
+codemap.egg-info/SOURCES.txt
+codemap.egg-info/dependency_links.txt
+codemap.egg-info/entry_points.txt
+codemap.egg-info/requires.txt
+codemap.egg-info/top_level.txt
