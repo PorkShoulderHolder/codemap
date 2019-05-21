@@ -32,6 +32,36 @@ Need functionality for inspecting a single function.
 """
 
 
+class CodeGraph(object):
+    def __init__(self, graphviz_object=None, igraph_object=None, **kwargs):
+        self.graphviz = graphviz_object
+        self.igraph = igraph_object
+
+    def add_node(self, id, **kwargs):
+        if self.graphviz:
+            cluster_name = kwargs["cluster"] if "cluster" in kwargs else False
+            highlight = kwargs["highlight"] if "highlight" in kwargs else False
+            is_class = kwargs["class"] if "class" in kwargs else False
+            if cluster_name:
+                with self.graphviz.subgraph(name="cluster_" + cluster_name) as cu:
+                    cu.attr(label=cluster_name)
+                    cu.attr(color='lightblue', style='filled')
+                    shape = "rectangle" if is_class else 'ellipse'
+
+                    if highlight:
+                        self.graphviz.attr('node', shape=shape, style='filled',
+                                           color='green')
+                    else:
+                        self.graphviz.attr('node', shape=shape, style='filled',
+                                           color='lightgrey')
+                    cu.node(id)
+            else:
+                self.graphviz.node(id)
+
+    def add_edge(self, n0, n1, **kwargs):
+        pass
+
+
 def get_files(path):
     """
     flattens the directory at path 
@@ -260,9 +290,6 @@ def graph_from_deps(dependencies, definition_map, file_map, reverse=False,
             else:
                 dot.node(f)
 
-    def c(x):
-        return "lightblue" if "intersection" in definition_map[k] else x
-
     for fn_name in tqdm(dependencies.keys(), desc="Adding Edges", leave=False):
         func = definition_map[fn_name]
         file_name = func["file"]
@@ -280,10 +307,10 @@ def graph_from_deps(dependencies, definition_map, file_map, reverse=False,
 
                 if inspect_function is not None and k == inspect_function:
                     dot.attr('node', shape=shape,
-                             style='filled', color=c('green'))
+                             style='filled', color='green')
                 else:
                     dot.attr('node', shape=shape,
-                             style='filled', color=c('lightgrey'))
+                             style='filled', color='lightgrey')
 
                 if definition_map[k]["file"] == file_name and \
                         highlight_files is not None and \
