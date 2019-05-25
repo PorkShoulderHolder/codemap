@@ -268,7 +268,7 @@ def graph_from_deps(dependencies, definition_map, file_map, reverse=False,
                     highlight_files=None, show_files=None):
     dot = graphviz.Digraph() if update_graph is None else update_graph
 
-    for f in tqdm(dependencies.keys() + flatten_deps(dependencies),
+    for f in tqdm(list(dependencies.keys()) + flatten_deps(dependencies),
                   desc="Adding Nodes", leave=False):
         func = definition_map[f]
         file_name = func["file"]

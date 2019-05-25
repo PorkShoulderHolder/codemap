@@ -1,1 +1,1 @@
-from codemap import analyze_deps
+from codemap.codemap import analyze_deps

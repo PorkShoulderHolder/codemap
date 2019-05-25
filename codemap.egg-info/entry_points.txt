@@ -1,4 +1,0 @@
-
-          [console_scripts]
-          codemap=codemap:analyze_deps
-       
